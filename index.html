@@ -104,6 +104,13 @@
   #header-nav button:hover{color:#fff;border-color:#4a3c34;}
   #header-nav button.active{background:rgba(255,255,255,.08);color:#fff;border-color:#4a3c34;}
   #header-nav button.voltar-btn{color:#c9b8a3;margin-right:6px;padding-right:12px;border-right:1px solid #4a3c34;border-radius:0;}
+  #header-nav select{
+    background:#2a1c18;border:1px solid #4a3c34;color:#c9b8a3;
+    padding:6px 10px;border-radius:5px;font-size:12.5px;font-weight:600;
+    cursor:pointer;font-family:'Inter',sans-serif;
+  }
+  #header-nav select:hover{color:#fff;border-color:#6b5a4e;}
+  #header-nav select option{color:#1c1210;background:#fffdf9;}
   @media(max-width:900px){
     #header-nav button .hn-label{display:none;}
     #header-nav button{padding:6px 8px;}
@@ -719,7 +726,6 @@
           <div class="field"><label>Até</label><input type="date" id="multilojas-ate"></div>
           <button class="btn-filter" id="multilojas-buscar">Filtrar</button>
         </div>
-        <button class="btn-add-item" id="btn-acessar-como-loja" style="margin-top:14px;display:none;">Acessar como esta loja</button>
       </div>
 
       <div class="stat-grid">
@@ -986,6 +992,7 @@ const HEADER_NAV_ITENS = [
   { target: 'estoque', icone: '📦', label: 'Estoque' },
   { target: 'paineis', icone: '📊', label: 'Painéis' },
   { target: 'multilojas', icone: '🏬', label: 'Multilojas', adminOnly: true },
+  { acao: 'seletor-loja', icone: '🔑', label: 'Acessar loja', adminOnly: true },
 ];
 
 function atualizarHeaderNav(nomeAtual){
@@ -1003,19 +1010,37 @@ function atualizarHeaderNav(nomeAtual){
   `;
   const itensSecoes = HEADER_NAV_ITENS
     .filter(item => !item.adminOnly || ehAdmin)
-    .map(item => `
-      <button data-target="${item.target}" class="${item.target === nomeAtual ? 'active' : ''}">
-        <span class="hn-icon">${item.icone}</span><span class="hn-label">${item.label}</span>
-      </button>
-    `).join('');
+    .map(item => item.acao === 'seletor-loja'
+      ? `<select id="header-seletor-loja" title="Acessar como esta loja"><option value="">Unidade</option></select>`
+      : `<button data-target="${item.target}" class="${item.target === nomeAtual ? 'active' : ''}">
+          <span class="hn-icon">${item.icone}</span><span class="hn-label">${item.label}</span>
+        </button>`
+    ).join('');
   nav.innerHTML = itensVoltar + itensSecoes;
   nav.querySelectorAll('button[data-target]').forEach(btn => {
     btn.addEventListener('click', () => showScreen(btn.dataset.target));
   });
+  if (ehAdmin) popularSeletorLojaHeader();
 }
 
 document.querySelectorAll('[data-target]').forEach(el => {
   el.addEventListener('click', () => showScreen(el.dataset.target));
+});
+
+async function popularSeletorLojaHeader(){
+  const select = document.getElementById('header-seletor-loja');
+  if (!select) return;
+  const { data: perfis, error } = await sb.from('profiles').select('unidade').eq('papel', 'franqueado').not('unidade', 'is', null);
+  if (error) return;
+  const unidades = [...new Set((perfis || []).map(p => p.unidade))].filter(Boolean).sort();
+  select.innerHTML = `<option value="">Unidade</option>` + unidades.map(u => `<option value="${u}">${u}</option>`).join('');
+}
+
+document.getElementById('header-nav')?.addEventListener('change', async (e) => {
+  if (e.target.id !== 'header-seletor-loja') return;
+  const unidade = e.target.value;
+  if (!unidade) return;
+  await entrarComoLoja(unidade);
 });
 
 let currentPainelTab = 'lanches';
@@ -3135,25 +3160,7 @@ document.getElementById('multilojas-tabela-unidades')?.addEventListener('click',
   }
   renderConsolidadoMultilojas();
 });
-document.getElementById('multilojas-filtro-loja')?.addEventListener('change', (e) => {
-  const btn = document.getElementById('btn-acessar-como-loja');
-  if (btn) btn.style.display = e.target.value === '__todas__' ? 'none' : '';
-  renderConsolidadoMultilojas();
-});
-
-document.getElementById('btn-acessar-como-loja')?.addEventListener('click', async () => {
-  const lojaEscolhida = document.getElementById('multilojas-filtro-loja').value;
-  if (lojaEscolhida === '__todas__') return;
-  const confirmado = await confirmarAcao(
-    `Acessar como "${lojaEscolhida}"?`,
-    'Você vai ver e agir na plataforma exatamente como essa loja — inclusive lançando lanche/desperdício em nome dela. Tudo fica registrado no log administrativo.',
-    '',
-    '',
-    'Sim, acessar como esta loja'
-  );
-  if (!confirmado) return;
-  await entrarComoLoja(lojaEscolhida);
-});
+document.getElementById('multilojas-filtro-loja')?.addEventListener('change', renderConsolidadoMultilojas);
 
 
 /* ============================================================
