@@ -798,7 +798,10 @@ const MOTIVOS = [
   { value: 'sobra_producao', label: 'Sobra de produção' },
   { value: 'erro_pedido', label: 'Erro de pedido (cliente)' },
   { value: 'fornecedor_qualidade', label: 'Problema de fornecedor/qualidade' },
+  { value: 'queimado', label: 'Queimado' },
+  { value: 'erro_producao', label: 'Erro de produção' },
 ];
+const MOTIVOS_COM_EVIDENCIA = ['queimado', 'erro_producao'];
 const MOTIVO_LABEL = Object.fromEntries(MOTIVOS.map(m => [m.value, m.label]));
 
 let CURRENT_USER = null;
@@ -814,6 +817,7 @@ let FORNECEDORES = [];
 let INSUMO_FORNECEDORES = [];
 let CARDAPIO = [];
 let LANCHES_ITENS = [];
+let DOCES = [];
 
 /* ============================================================
    HELPERS
@@ -1368,8 +1372,13 @@ async function abrirEdicaoDesperdicio(registroId){
           refId: i.tipo === 'insumo' ? (i.insumo_id || '') : (i.cardapio_item_id || ''),
           refId2: i.cardapio_item_id_2 || '',
           tamanho,
+          doceId: i.doce_item_id || '',
           quantidade: String(i.quantidade),
           motivo: i.motivo || '',
+          descricao: i.descricao || '',
+          fotoFile: null,
+          fotoNome: '',
+          fotoUrlExistente: i.foto_url || null,
         };
       })
     : [novaLinha()];
@@ -1433,18 +1442,20 @@ async function popularSeletorHojeOntem(selectId, tabela){
    CATÁLOGOS (insumos + cardápio) — carregados do Supabase
    ============================================================ */
 async function loadCatalogos(){
-  const [{ data: insumos }, { data: cardapio }, { data: lanches }, { data: fornecedores }, { data: insumoFornecedores }] = await Promise.all([
+  const [{ data: insumos }, { data: cardapio }, { data: lanches }, { data: fornecedores }, { data: insumoFornecedores }, { data: doces }] = await Promise.all([
     sb.from('insumos').select('*').order('nome'),
     sb.from('cardapio_itens').select('*').eq('status_planilha', 'Ativo').order('nome'),
     sb.from('lanches_itens_cardapio').select('*').eq('status_planilha', 'Ativo').order('nome'),
     sb.from('fornecedores').select('*').order('nome'),
     sb.from('insumo_fornecedores').select('*'),
+    sb.from('doces_itens_cardapio').select('*').eq('status_planilha', 'Ativo').order('categoria').order('nome'),
   ]);
   INSUMOS = insumos || [];
   CARDAPIO = cardapio || [];
   LANCHES_ITENS = lanches || [];
   FORNECEDORES = fornecedores || [];
   INSUMO_FORNECEDORES = insumoFornecedores || [];
+  DOCES = doces || [];
 }
 
 function fornecedoresDoInsumo(insumoId){
@@ -1863,7 +1874,7 @@ async function carregarPainelLanches(){
 let itemRowsState = [];
 
 function novaLinha(){
-  return { id: uid(), tipo: 'insumo', refId: '', refId2: '', tamanho: '', quantidade: '', motivo: '' };
+  return { id: uid(), tipo: 'insumo', refId: '', refId2: '', tamanho: '', doceId: '', quantidade: '', motivo: '', descricao: '', fotoFile: null, fotoNome: '' };
 }
 itemRowsState.push(novaLinha());
 
@@ -1895,6 +1906,18 @@ function renderItemRows(){
           <option value="">Selecione...</option>
           ${opcoes}
         </select>`;
+    } else if (row.tipo === 'doce'){
+      const categorias = [...new Set(DOCES.map(d => d.categoria))];
+      const grupos = categorias.map(cat => `
+        <optgroup label="${cat}">
+          ${DOCES.filter(d => d.categoria === cat).map(d => `<option value="${d.id}" ${row.doceId===d.id?'selected':''}>${d.nome} — ${d.tamanho}</option>`).join('')}
+        </optgroup>`).join('');
+      itemColunaHtml = `
+        <label>Doce (Woodstock)</label>
+        <select data-field="doceId" data-idx="${idx}">
+          <option value="">Selecione...</option>
+          ${grupos}
+        </select>`;
     } else {
       const opcoesTamanho = tamanhosDisponiveis().map(t => `<option value="${t}" ${row.tamanho===t?'selected':''}>${t}</option>`).join('');
       const cardapioFiltrado = row.tamanho ? CARDAPIO.filter(c => c.tamanho === row.tamanho) : CARDAPIO;
@@ -1920,6 +1943,7 @@ function renderItemRows(){
 
     const unidadeQtd = row.tipo === 'insumo' ? (unidadeDoInsumo(row.refId) || 'un') : 'un';
     const stepQtd = unidadeQtd.toLowerCase() === 'un' ? '1' : '0.01';
+    const precisaEvidencia = MOTIVOS_COM_EVIDENCIA.includes(row.motivo);
 
     div.innerHTML = `
       <div>
@@ -1928,6 +1952,7 @@ function renderItemRows(){
           <option value="insumo" ${row.tipo==='insumo'?'selected':''}>Insumo solto</option>
           <option value="pizza" ${row.tipo==='pizza'?'selected':''}>Pizza inteira</option>
           <option value="pizza_meia" ${row.tipo==='pizza_meia'?'selected':''}>Pizza meio a meio</option>
+          <option value="doce" ${row.tipo==='doce'?'selected':''}>Doce (Woodstock)</option>
         </select>
       </div>
       <div>${itemColunaHtml}</div>
@@ -1944,6 +1969,14 @@ function renderItemRows(){
         </select>
       </div>
       <button class="btn-remove" data-remove="${idx}" title="Remover item">×</button>
+      ${precisaEvidencia ? `
+      <div style="grid-column:1/-1;background:var(--flour-2);border-radius:6px;padding:12px;margin-top:2px;">
+        <label>Descreva o que aconteceu (obrigatório)</label>
+        <textarea data-field="descricao" data-idx="${idx}" rows="2" style="width:100%;font-family:inherit;font-size:14px;padding:8px;border:1.5px solid var(--line);border-radius:6px;margin-bottom:10px;" placeholder="Ex: esqueceu no forno, saiu da receita padrão...">${row.descricao || ''}</textarea>
+        <label>Foto (obrigatório)</label><br>
+        <input type="file" accept="image/*" capture="environment" data-field="foto" data-idx="${idx}">
+        ${row.fotoNome ? `<span style="font-size:12.5px;color:var(--ink-soft);margin-left:8px;">📎 ${row.fotoNome}</span>` : ''}
+      </div>` : ''}
     `;
     container.appendChild(div);
   });
@@ -1957,8 +1990,15 @@ document.getElementById('item-rows').addEventListener('change', (e) => {
   const field = e.target.dataset.field;
   const idx = e.target.dataset.idx;
   if (field === undefined || idx === undefined) return;
+  if (field === 'foto'){
+    const file = e.target.files && e.target.files[0];
+    itemRowsState[idx].fotoFile = file || null;
+    itemRowsState[idx].fotoNome = file ? file.name : '';
+    renderItemRows();
+    return;
+  }
   itemRowsState[idx][field] = e.target.value;
-  if (field === 'tipo'){ itemRowsState[idx].refId = ''; itemRowsState[idx].refId2 = ''; itemRowsState[idx].tamanho = ''; }
+  if (field === 'tipo'){ itemRowsState[idx].refId = ''; itemRowsState[idx].refId2 = ''; itemRowsState[idx].tamanho = ''; itemRowsState[idx].doceId = ''; }
   if (field === 'tamanho'){ itemRowsState[idx].refId = ''; itemRowsState[idx].refId2 = ''; }
   renderItemRows();
 });
@@ -1986,6 +2026,10 @@ function calcularCusto(row){
     if (!item1 || !item2) return 0;
     const custoMedio = (item1.custo_total + item2.custo_total) / 2;
     return custoMedio * parseFloat(row.quantidade || 0);
+  } else if (row.tipo === 'doce'){
+    const doce = DOCES.find(d => d.id === row.doceId);
+    if (!doce) return 0;
+    return doce.custo_franqueado * parseFloat(row.quantidade || 0);
   } else {
     const item = CARDAPIO.find(c => c.id === row.refId);
     if (!item) return 0;
@@ -2013,22 +2057,33 @@ async function salvarEdicaoDesperdicio(linhasValidas){
   const { error: errDel } = await sb.from('desperdicio_itens').delete().eq('registro_id', registroId);
   if (errDel) throw errDel;
 
-  const itensParaInserir = linhasValidas.map(row => {
+  const itensParaInserir = [];
+  for (const row of linhasValidas){
     const isInsumo = row.tipo === 'insumo';
     const isMeia = row.tipo === 'pizza_meia';
+    const isDoce = row.tipo === 'doce';
     const unidade = isInsumo ? unidadeDoInsumo(row.refId) : 'Un';
-    return {
+
+    let fotoUrl = row.fotoUrlExistente || null;
+    if (row.fotoFile){
+      fotoUrl = await uploadFotoDesperdicio(row.fotoFile, registroId);
+    }
+
+    itensParaInserir.push({
       registro_id: registroId,
       tipo: row.tipo,
       insumo_id: isInsumo ? row.refId : null,
-      cardapio_item_id: isInsumo ? null : row.refId,
+      cardapio_item_id: (isInsumo || isDoce) ? null : row.refId,
       cardapio_item_id_2: isMeia ? row.refId2 : null,
+      doce_item_id: isDoce ? row.doceId : null,
       quantidade: parseFloat(row.quantidade),
       unidade,
       motivo: row.motivo,
+      descricao: row.descricao || null,
+      foto_url: fotoUrl,
       custo_calculado: Math.round(calcularCusto(row) * 100) / 100,
-    };
-  });
+    });
+  }
   const { error: errItens } = await sb.from('desperdicio_itens').insert(itensParaInserir);
   if (errItens) throw errItens;
 
@@ -2043,14 +2098,33 @@ async function salvarEdicaoDesperdicio(linhasValidas){
   verificarAlertaDesperdicio7Dias();
 }
 
+async function uploadFotoDesperdicio(file, registroId){
+  const extensao = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const caminho = `${registroId}/${uid()}.${extensao}`;
+  const { error } = await sb.storage.from('desperdicio-fotos').upload(caminho, file, { upsert: false });
+  if (error){
+    console.warn('Falha ao enviar foto:', error.message);
+    showToast('Item salvo, mas a foto não foi enviada: ' + error.message, true);
+    return null;
+  }
+  const { data } = sb.storage.from('desperdicio-fotos').getPublicUrl(caminho);
+  return data?.publicUrl || null;
+}
+
 document.getElementById('btn-submit-desperdicio').addEventListener('click', async () => {
   const linhasValidas = itemRowsState.filter(r => {
     if (!r.quantidade || !r.motivo) return false;
     if (r.tipo === 'pizza_meia') return r.refId && r.refId2;
+    if (r.tipo === 'doce') return r.doceId;
     return r.refId;
   });
   if (linhasValidas.length === 0){
     showToast('Preencha ao menos um item completo antes de registrar.', true);
+    return;
+  }
+  const linhaSemEvidencia = linhasValidas.find(r => MOTIVOS_COM_EVIDENCIA.includes(r.motivo) && (!r.descricao?.trim() || !r.fotoFile));
+  if (linhaSemEvidencia){
+    showToast('Pra motivo "Queimado" ou "Erro de produção", a descrição e a foto são obrigatórias.', true);
     return;
   }
 
@@ -2110,22 +2184,33 @@ document.getElementById('btn-submit-desperdicio').addEventListener('click', asyn
       .select().single();
     if (errReg) throw errReg;
 
-    const itensParaInserir = linhasValidas.map(row => {
+    const itensParaInserir = [];
+    for (const row of linhasValidas){
       const isInsumo = row.tipo === 'insumo';
       const isMeia = row.tipo === 'pizza_meia';
+      const isDoce = row.tipo === 'doce';
       const unidade = isInsumo ? unidadeDoInsumo(row.refId) : 'Un';
-      return {
+
+      let fotoUrl = null;
+      if (row.fotoFile){
+        fotoUrl = await uploadFotoDesperdicio(row.fotoFile, registro.id);
+      }
+
+      itensParaInserir.push({
         registro_id: registro.id,
         tipo: row.tipo,
         insumo_id: isInsumo ? row.refId : null,
-        cardapio_item_id: isInsumo ? null : row.refId,
+        cardapio_item_id: (isInsumo || isDoce) ? null : row.refId,
         cardapio_item_id_2: isMeia ? row.refId2 : null,
+        doce_item_id: isDoce ? row.doceId : null,
         quantidade: parseFloat(row.quantidade),
         unidade,
         motivo: row.motivo,
+        descricao: row.descricao || null,
+        foto_url: fotoUrl,
         custo_calculado: Math.round(calcularCusto(row) * 100) / 100,
-      };
-    });
+      });
+    }
 
     const { error: errItens } = await sb.from('desperdicio_itens').insert(itensParaInserir);
     if (errItens) throw errItens;
@@ -2151,6 +2236,10 @@ document.getElementById('btn-submit-desperdicio').addEventListener('click', asyn
 
 function nomeLinhaLocal(row){
   if (row.tipo === 'insumo') return INSUMOS.find(i => i.id === row.refId)?.nome;
+  if (row.tipo === 'doce'){
+    const d = DOCES.find(d => d.id === row.doceId);
+    return d ? `${d.categoria} ${d.nome} (${d.tamanho})` : '';
+  }
   if (row.tipo === 'pizza_meia'){
     const c1 = CARDAPIO.find(c => c.id === row.refId);
     const c2 = CARDAPIO.find(c => c.id === row.refId2);
@@ -2769,6 +2858,10 @@ async function buscarDadosMultilojas(){
 
 function nomeItemDespDB(item){
   if (item.tipo === 'insumo') return INSUMOS.find(i => i.id === item.insumo_id)?.nome || '(item removido)';
+  if (item.tipo === 'doce'){
+    const d = DOCES.find(d => d.id === item.doce_item_id);
+    return d ? `${d.categoria} ${d.nome}` : '(item removido)';
+  }
   if (item.tipo === 'pizza_meia'){
     const c1 = CARDAPIO.find(c => c.id === item.cardapio_item_id);
     const c2 = CARDAPIO.find(c => c.id === item.cardapio_item_id_2);
