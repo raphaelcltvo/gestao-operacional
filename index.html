@@ -445,7 +445,11 @@
 
       <div class="card">
         <h2 id="desperdicio-titulo">Registrar desperdício</h2>
-        <p class="desc">Adicione um ou mais itens perdidos — insumo solto (pesado em gramas/ml/unidades), pizza inteira ou meio a meio.</p>
+        <p class="desc" id="desperdicio-marca-desc">Adicione um ou mais itens perdidos — insumo solto (pesado em gramas/ml/unidades), pizza inteira ou meio a meio.</p>
+        <div class="segmented" id="desperdicio-marca-tabs" style="margin-bottom:18px;">
+          <button type="button" data-marca="forneria" class="active">Forneria Original</button>
+          <button type="button" data-marca="woodstock">Woodstock</button>
+        </div>
         <div class="grid-2" style="max-width:580px;margin-bottom:18px;">
           <div class="field" id="desperdicio-data-select-wrap">
             <label>Data do lançamento</label>
@@ -1872,11 +1876,24 @@ async function carregarPainelLanches(){
    FORMULÁRIO DE DESPERDÍCIO
    ============================================================ */
 let itemRowsState = [];
+let MARCA_DESPERDICIO_ATUAL = 'forneria';
 
 function novaLinha(){
-  return { id: uid(), tipo: 'insumo', refId: '', refId2: '', tamanho: '', doceId: '', quantidade: '', motivo: '', descricao: '', fotoFile: null, fotoNome: '' };
+  return { id: uid(), tipo: MARCA_DESPERDICIO_ATUAL === 'woodstock' ? 'doce' : 'insumo', refId: '', refId2: '', tamanho: '', doceId: '', quantidade: '', motivo: '', descricao: '', fotoFile: null, fotoNome: '' };
 }
 itemRowsState.push(novaLinha());
+
+document.getElementById('desperdicio-marca-tabs')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-marca]');
+  if (!btn) return;
+  MARCA_DESPERDICIO_ATUAL = btn.dataset.marca;
+  document.querySelectorAll('#desperdicio-marca-tabs button').forEach(b => b.classList.toggle('active', b.dataset.marca === MARCA_DESPERDICIO_ATUAL));
+  document.getElementById('desperdicio-marca-desc').textContent = MARCA_DESPERDICIO_ATUAL === 'woodstock'
+    ? 'Adicione um ou mais doces perdidos (Woodstock) — Brownie, Cookão, Brookie ou Cheesecake.'
+    : 'Adicione um ou mais itens perdidos — insumo solto (pesado em gramas/ml/unidades), pizza inteira ou meio a meio.';
+  itemRowsState = [novaLinha()];
+  renderItemRows();
+});
 
 function tamanhosDisponiveis(){
   return [...new Set(CARDAPIO.map(c => c.tamanho))].sort();
@@ -1944,17 +1961,17 @@ function renderItemRows(){
     const unidadeQtd = row.tipo === 'insumo' ? (unidadeDoInsumo(row.refId) || 'un') : 'un';
     const stepQtd = unidadeQtd.toLowerCase() === 'un' ? '1' : '0.01';
     const precisaEvidencia = MOTIVOS_COM_EVIDENCIA.includes(row.motivo);
-
-    div.innerHTML = `
-      <div>
-        <label>Tipo</label>
+    const tipoColunaHtml = MARCA_DESPERDICIO_ATUAL === 'woodstock'
+      ? `<label>Tipo</label><div style="padding:11px 13px;color:var(--ink-soft);font-size:14px;">Doce (Woodstock)</div>`
+      : `<label>Tipo</label>
         <select data-field="tipo" data-idx="${idx}">
           <option value="insumo" ${row.tipo==='insumo'?'selected':''}>Insumo solto</option>
           <option value="pizza" ${row.tipo==='pizza'?'selected':''}>Pizza inteira</option>
           <option value="pizza_meia" ${row.tipo==='pizza_meia'?'selected':''}>Pizza meio a meio</option>
-          <option value="doce" ${row.tipo==='doce'?'selected':''}>Doce (Woodstock)</option>
-        </select>
-      </div>
+        </select>`;
+
+    div.innerHTML = `
+      <div>${tipoColunaHtml}</div>
       <div>${itemColunaHtml}</div>
       <div>
         <label>Qtd (${unidadeQtd})</label>
