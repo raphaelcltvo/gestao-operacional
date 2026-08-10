@@ -86,7 +86,7 @@
   #app-shell{display:none;min-height:100vh;}
   header.topbar{
     background:var(--char);color:var(--flour);padding:10px 24px;
-    display:grid;grid-template-columns:1fr auto 1fr;align-items:center;position:sticky;top:0;z-index:20;
+    display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;position:sticky;top:0;z-index:20;
     border-bottom:2px solid var(--ember);
   }
   .brand{display:flex;align-items:center;justify-content:center;gap:12px;}
@@ -94,7 +94,7 @@
   .who{display:flex;align-items:center;justify-content:flex-end;gap:12px;font-size:13px;}
   .who .name{color:#e3d7c6;font-size:13px;font-weight:500;}
   .who .role-tag{background:var(--ember);color:#fff;font-size:10px;padding:3px 9px;border-radius:3px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;}
-  #header-nav{display:flex;align-items:center;gap:4px;}
+  #header-nav{display:flex;align-items:center;gap:4px;flex-wrap:wrap;overflow:hidden;}
   #header-nav button{
     background:transparent;border:1px solid transparent;color:#a8988a;
     padding:6px 10px;border-radius:5px;font-size:12.5px;font-weight:600;
@@ -1448,11 +1448,11 @@ async function popularSeletorHojeOntem(selectId, tabela){
 async function loadCatalogos(){
   const [{ data: insumos }, { data: cardapio }, { data: lanches }, { data: fornecedores }, { data: insumoFornecedores }, { data: doces }] = await Promise.all([
     sb.from('insumos').select('*').order('nome'),
-    sb.from('cardapio_itens').select('*').eq('status_planilha', 'Ativo').order('nome'),
-    sb.from('lanches_itens_cardapio').select('*').eq('status_planilha', 'Ativo').order('nome'),
+    sb.from('cardapio_itens').select('*').order('nome'),
+    sb.from('lanches_itens_cardapio').select('*').order('nome'),
     sb.from('fornecedores').select('*').order('nome'),
     sb.from('insumo_fornecedores').select('*'),
-    sb.from('doces_itens_cardapio').select('*').eq('status_planilha', 'Ativo').order('categoria').order('nome'),
+    sb.from('doces_itens_cardapio').select('*').order('categoria').order('nome'),
   ]);
   INSUMOS = insumos || [];
   CARDAPIO = cardapio || [];
@@ -1460,6 +1460,23 @@ async function loadCatalogos(){
   FORNECEDORES = fornecedores || [];
   INSUMO_FORNECEDORES = insumoFornecedores || [];
   DOCES = doces || [];
+}
+
+function cardapioAtivos(){
+  return CARDAPIO.filter(c => c.status_planilha !== 'Inativo');
+}
+function lanchesAtivos(){
+  return LANCHES_ITENS.filter(l => l.status_planilha !== 'Inativo');
+}
+function docesAtivos(){
+  return DOCES.filter(d => d.status_planilha !== 'Inativo');
+}
+/* Garante que o item já selecionado numa linha (mesmo se desativado depois) continue
+   aparecendo como opção ao editar um lançamento antigo — só não entra em listas de item novo. */
+function comItemSelecionadoGarantido(lista, todos, idSelecionado){
+  if (!idSelecionado || lista.some(x => x.id === idSelecionado)) return lista;
+  const item = todos.find(x => x.id === idSelecionado);
+  return item ? [...lista, item] : lista;
 }
 
 function fornecedoresDoInsumo(insumoId){
@@ -1482,7 +1499,8 @@ function renderLancheRows(){
     const div = document.createElement('div');
     div.className = 'item-row';
     div.style.gridTemplateColumns = '1fr 100px 32px';
-    const opcoes = LANCHES_ITENS.map(l => `<option value="${l.id}" ${row.itemId===l.id?'selected':''}>${l.nome}</option>`).join('');
+    const listaLanches = comItemSelecionadoGarantido(lanchesAtivos(), LANCHES_ITENS, row.itemId);
+    const opcoes = listaLanches.map(l => `<option value="${l.id}" ${row.itemId===l.id?'selected':''}>${l.nome}${l.status_planilha==='Inativo'?' (inativo)':''}</option>`).join('');
     div.innerHTML = `
       <div>
         <label>Lanche</label>
@@ -1577,8 +1595,11 @@ async function salvarEdicaoLanche(linhasValidas, internos, externos){
   }).eq('id', registroId);
   if (errUpdate) throw errUpdate;
 
-  const { error: errDel } = await sb.from('lanches_itens').delete().eq('registro_id', registroId);
+  const { data: deletados, error: errDel } = await sb.from('lanches_itens').delete().eq('registro_id', registroId).select('id');
   if (errDel) throw errDel;
+  if (itensAntes && itensAntes.length > 0 && (!deletados || deletados.length === 0)){
+    throw new Error('O banco recusou apagar os itens antigos (permissão faltando). Rode o SQL "schema_editar_lancamentos.sql" no Supabase antes de tentar de novo — nada foi alterado, pode tentar com segurança depois.');
+  }
 
   const itensParaInserir = linhasValidas.map(row => {
     const item = LANCHES_ITENS.find(l => l.id === row.itemId);
@@ -1606,7 +1627,7 @@ async function salvarEdicaoLanche(linhasValidas, internos, externos){
 document.getElementById('btn-submit-lanches')?.addEventListener('click', async () => {
   const linhasValidas = lancheRowsState.filter(r => r.itemId && r.quantidade);
   if (linhasValidas.length === 0){
-    showToast('Selecione ao menos um lanche e a quantidade.', true);
+    showToast('Selecione ao menos um lanche e a quantidade. Confira se o campo "Lanche" está mesmo selecionado.', true);
     return;
   }
   if (!validarQuantidadeLanches()){
@@ -1896,7 +1917,7 @@ document.getElementById('desperdicio-marca-tabs')?.addEventListener('click', (e)
 });
 
 function tamanhosDisponiveis(){
-  return [...new Set(CARDAPIO.map(c => c.tamanho))].sort();
+  return [...new Set(cardapioAtivos().map(c => c.tamanho))].sort();
 }
 
 function renderItemRows(){
@@ -1908,7 +1929,8 @@ function renderItemRows(){
 
     let itemColunaHtml;
     if (row.tipo === 'insumo'){
-      const opcoes = INSUMOS.filter(i => i.status_planilha !== 'Inativo').map(i => `<option value="${i.id}" ${row.refId===i.id?'selected':''}>${i.nome} (${i.unidade})</option>`).join('');
+      const listaInsumos = comItemSelecionadoGarantido(insumosAtivos(), INSUMOS, row.refId);
+      const opcoes = listaInsumos.map(i => `<option value="${i.id}" ${row.refId===i.id?'selected':''}>${i.nome} (${i.unidade})${i.status_planilha==='Inativo'?' — inativo':''}</option>`).join('');
       itemColunaHtml = `
         <label>Item</label>
         <select data-field="refId" data-idx="${idx}">
@@ -1916,7 +1938,8 @@ function renderItemRows(){
           ${opcoes}
         </select>`;
     } else if (row.tipo === 'pizza'){
-      const opcoes = CARDAPIO.map(c => `<option value="${c.id}" ${row.refId===c.id?'selected':''}>${c.nome} — ${c.tamanho}</option>`).join('');
+      const listaPizza = comItemSelecionadoGarantido(cardapioAtivos(), CARDAPIO, row.refId);
+      const opcoes = listaPizza.map(c => `<option value="${c.id}" ${row.refId===c.id?'selected':''}>${c.nome} — ${c.tamanho}${c.status_planilha==='Inativo'?' (inativo)':''}</option>`).join('');
       itemColunaHtml = `
         <label>Item</label>
         <select data-field="refId" data-idx="${idx}">
@@ -1924,10 +1947,11 @@ function renderItemRows(){
           ${opcoes}
         </select>`;
     } else if (row.tipo === 'doce'){
-      const categorias = [...new Set(DOCES.map(d => d.categoria))];
+      const listaDoces = comItemSelecionadoGarantido(docesAtivos(), DOCES, row.doceId);
+      const categorias = [...new Set(listaDoces.map(d => d.categoria))];
       const grupos = categorias.map(cat => `
         <optgroup label="${cat}">
-          ${DOCES.filter(d => d.categoria === cat).map(d => `<option value="${d.id}" ${row.doceId===d.id?'selected':''}>${d.nome} — ${d.tamanho}</option>`).join('')}
+          ${listaDoces.filter(d => d.categoria === cat).map(d => `<option value="${d.id}" ${row.doceId===d.id?'selected':''}>${d.nome} — ${d.tamanho}${d.status_planilha==='Inativo'?' (inativo)':''}</option>`).join('')}
         </optgroup>`).join('');
       itemColunaHtml = `
         <label>Doce (Woodstock)</label>
@@ -1937,9 +1961,11 @@ function renderItemRows(){
         </select>`;
     } else {
       const opcoesTamanho = tamanhosDisponiveis().map(t => `<option value="${t}" ${row.tamanho===t?'selected':''}>${t}</option>`).join('');
-      const cardapioFiltrado = row.tamanho ? CARDAPIO.filter(c => c.tamanho === row.tamanho) : CARDAPIO;
-      const opcoesSabor1 = cardapioFiltrado.map(c => `<option value="${c.id}" ${row.refId===c.id?'selected':''}>${c.nome}</option>`).join('');
-      const opcoesSabor2 = cardapioFiltrado.map(c => `<option value="${c.id}" ${row.refId2===c.id?'selected':''}>${c.nome}</option>`).join('');
+      let cardapioFiltrado = row.tamanho ? cardapioAtivos().filter(c => c.tamanho === row.tamanho) : cardapioAtivos();
+      cardapioFiltrado = comItemSelecionadoGarantido(cardapioFiltrado, CARDAPIO, row.refId);
+      cardapioFiltrado = comItemSelecionadoGarantido(cardapioFiltrado, CARDAPIO, row.refId2);
+      const opcoesSabor1 = cardapioFiltrado.map(c => `<option value="${c.id}" ${row.refId===c.id?'selected':''}>${c.nome}${c.status_planilha==='Inativo'?' (inativo)':''}</option>`).join('');
+      const opcoesSabor2 = cardapioFiltrado.map(c => `<option value="${c.id}" ${row.refId2===c.id?'selected':''}>${c.nome}${c.status_planilha==='Inativo'?' (inativo)':''}</option>`).join('');
       itemColunaHtml = `
         <label>Tamanho</label>
         <select data-field="tamanho" data-idx="${idx}" style="margin-bottom:6px;">
@@ -2071,8 +2097,11 @@ async function salvarEdicaoDesperdicio(linhasValidas){
   const { error: errUpdate } = await sb.from('desperdicio_registros').update({ data_registro: novaData }).eq('id', registroId);
   if (errUpdate) throw errUpdate;
 
-  const { error: errDel } = await sb.from('desperdicio_itens').delete().eq('registro_id', registroId);
+  const { data: deletados, error: errDel } = await sb.from('desperdicio_itens').delete().eq('registro_id', registroId).select('id');
   if (errDel) throw errDel;
+  if (itensAntes && itensAntes.length > 0 && (!deletados || deletados.length === 0)){
+    throw new Error('O banco recusou apagar os itens antigos (permissão faltando). Rode o SQL "schema_editar_lancamentos.sql" no Supabase antes de tentar de novo — nada foi alterado, pode tentar com segurança depois.');
+  }
 
   const itensParaInserir = [];
   for (const row of linhasValidas){
@@ -2136,7 +2165,7 @@ document.getElementById('btn-submit-desperdicio').addEventListener('click', asyn
     return r.refId;
   });
   if (linhasValidas.length === 0){
-    showToast('Preencha ao menos um item completo antes de registrar.', true);
+    showToast('Preencha item, quantidade e motivo em pelo menos uma linha. Confira se o campo "Item" está mesmo selecionado.', true);
     return;
   }
   const linhaSemEvidencia = linhasValidas.find(r => MOTIVOS_COM_EVIDENCIA.includes(r.motivo) && (!r.descricao?.trim() || !r.fotoFile));
