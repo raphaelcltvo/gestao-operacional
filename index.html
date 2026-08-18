@@ -1465,6 +1465,18 @@ async function loadCatalogos(){
 function cardapioAtivos(){
   return CARDAPIO.filter(c => c.status_planilha !== 'Inativo');
 }
+function agruparPorVegana(lista, selecionado, comTamanho){
+  const opcaoHtml = c => {
+    const rotulo = comTamanho ? `${c.nome} — ${c.tamanho}` : c.nome;
+    return `<option value="${c.id}" ${selecionado===c.id?'selected':''}>${rotulo}${c.status_planilha==='Inativo'?' (inativo)':''}</option>`;
+  };
+  const tradicionais = lista.filter(c => !c.vegana);
+  const veganas = lista.filter(c => c.vegana);
+  let html = '';
+  if (tradicionais.length) html += `<optgroup label="Tradicionais">${tradicionais.map(opcaoHtml).join('')}</optgroup>`;
+  if (veganas.length) html += `<optgroup label="Veganas 🌱">${veganas.map(opcaoHtml).join('')}</optgroup>`;
+  return html;
+}
 function lanchesAtivos(){
   return LANCHES_ITENS.filter(l => l.status_planilha !== 'Inativo');
 }
@@ -1939,12 +1951,11 @@ function renderItemRows(){
         </select>`;
     } else if (row.tipo === 'pizza'){
       const listaPizza = comItemSelecionadoGarantido(cardapioAtivos(), CARDAPIO, row.refId);
-      const opcoes = listaPizza.map(c => `<option value="${c.id}" ${row.refId===c.id?'selected':''}>${c.nome} — ${c.tamanho}${c.status_planilha==='Inativo'?' (inativo)':''}</option>`).join('');
       itemColunaHtml = `
         <label>Item</label>
         <select data-field="refId" data-idx="${idx}">
           <option value="">Selecione...</option>
-          ${opcoes}
+          ${agruparPorVegana(listaPizza, row.refId, true)}
         </select>`;
     } else if (row.tipo === 'doce'){
       const listaDoces = comItemSelecionadoGarantido(docesAtivos(), DOCES, row.doceId);
@@ -1964,23 +1975,33 @@ function renderItemRows(){
       let cardapioFiltrado = row.tamanho ? cardapioAtivos().filter(c => c.tamanho === row.tamanho) : cardapioAtivos();
       cardapioFiltrado = comItemSelecionadoGarantido(cardapioFiltrado, CARDAPIO, row.refId);
       cardapioFiltrado = comItemSelecionadoGarantido(cardapioFiltrado, CARDAPIO, row.refId2);
-      const opcoesSabor1 = cardapioFiltrado.map(c => `<option value="${c.id}" ${row.refId===c.id?'selected':''}>${c.nome}${c.status_planilha==='Inativo'?' (inativo)':''}</option>`).join('');
-      const opcoesSabor2 = cardapioFiltrado.map(c => `<option value="${c.id}" ${row.refId2===c.id?'selected':''}>${c.nome}${c.status_planilha==='Inativo'?' (inativo)':''}</option>`).join('');
+
+      // Não se faz pizza meio a meio misturando vegano com não-vegano: cada lado só mostra
+      // opções compatíveis com o que já foi escolhido do outro lado.
+      const item1Atual = CARDAPIO.find(c => c.id === row.refId);
+      const item2Atual = CARDAPIO.find(c => c.id === row.refId2);
+      const listaParaSabor1 = item2Atual ? cardapioFiltrado.filter(c => c.vegana === item2Atual.vegana || c.id === row.refId) : cardapioFiltrado;
+      const listaParaSabor2 = item1Atual ? cardapioFiltrado.filter(c => c.vegana === item1Atual.vegana || c.id === row.refId2) : cardapioFiltrado;
+      const avisoMistura = (item1Atual || item2Atual)
+        ? `<div style="font-size:11px;color:var(--ink-soft);margin:2px 0 6px;">Meio a meio não mistura vegano com tradicional — só aparecem sabores compatíveis.</div>`
+        : '';
+
       itemColunaHtml = `
         <label>Tamanho</label>
         <select data-field="tamanho" data-idx="${idx}" style="margin-bottom:6px;">
           <option value="">Selecione...</option>
           ${opcoesTamanho}
         </select>
+        ${avisoMistura}
         <label>Sabor 1</label>
         <select data-field="refId" data-idx="${idx}" style="margin-bottom:6px;">
           <option value="">Selecione...</option>
-          ${opcoesSabor1}
+          ${agruparPorVegana(listaParaSabor1, row.refId, false)}
         </select>
         <label>Sabor 2</label>
         <select data-field="refId2" data-idx="${idx}">
           <option value="">Selecione...</option>
-          ${opcoesSabor2}
+          ${agruparPorVegana(listaParaSabor2, row.refId2, false)}
         </select>`;
     }
 
